@@ -9,10 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -180,29 +177,12 @@ func queryPostgresTool(ctx context.Context, req *mcp.CallToolRequest, input Quer
 		}, nil, nil
 	}
 
-	// 2. Call Python Excel Generator via temp JSON file
-	filename, err := callPythonExcelGenerator(records, input.Question, input.SQLQuery)
-	if err != nil {
-		log.Printf("Error generating Excel report: %v", err)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{
-					Text: fmt.Sprintf("Error generating Excel report: %v", err),
-				},
-			},
-		}, nil, nil
-	}
-
-	// 3. Build Markdown Preview Response
-	serverPort := getEnv("MCP_SERVER_PORT", "10015")
-	downloadURL := fmt.Sprintf("http://localhost:%s/download/%s", serverPort, filename)
-
+	// 2. Build Markdown Table Response
 	var summaryLines []string
 	summaryLines = append(summaryLines, "### Query Results Executed Successfully")
 	summaryLines = append(summaryLines, fmt.Sprintf("**Record Count**: %d row(s)", len(records)))
-	summaryLines = append(summaryLines, fmt.Sprintf("**Download BCG Excel Report**: [Click to Download Excel](%s)", downloadURL))
 	summaryLines = append(summaryLines, "")
-	summaryLines = append(summaryLines, "#### Preview (First 5 rows):")
+	summaryLines = append(summaryLines, "#### Results Preview:")
 
 	if len(records) == 0 {
 		summaryLines = append(summaryLines, "*No data returned.*")
@@ -214,8 +194,8 @@ func queryPostgresTool(ctx context.Context, req *mcp.CallToolRequest, input Quer
 		summaryLines = append(summaryLines, headerRow)
 		summaryLines = append(summaryLines, dividerRow)
 
-		limit := 5
-		if len(records) < 5 {
+		limit := 10
+		if len(records) < 10 {
 			limit = len(records)
 		}
 
@@ -233,8 +213,8 @@ func queryPostgresTool(ctx context.Context, req *mcp.CallToolRequest, input Quer
 			summaryLines = append(summaryLines, rowText)
 		}
 
-		if len(records) > 5 {
-			summaryLines = append(summaryLines, fmt.Sprintf("\n*...and %d more rows.*", len(records)-5))
+		if len(records) > 10 {
+			summaryLines = append(summaryLines, fmt.Sprintf("\n*...and %d more rows.*", len(records)-10))
 		}
 	}
 
@@ -336,71 +316,7 @@ func executePostgresQuery(sqlQuery string) ([]map[string]interface{}, error) {
 	return records, nil
 }
 
-func getPythonExecutable() string {
-	// 1. Check active virtualenv env var
-	if venv := os.Getenv("VIRTUAL_ENV"); venv != "" {
-		pyPath := filepath.Join(venv, "Scripts", "python.exe")
-		if _, err := os.Stat(pyPath); err == nil {
-			return pyPath
-		}
-	}
-	
-	// 2. Check local directories .venv2 or .venv
-	localVenvs := []string{".venv2", ".venv"}
-	for _, v := range localVenvs {
-		pyPath := filepath.Join(v, "Scripts", "python.exe")
-		if _, err := os.Stat(pyPath); err == nil {
-			return pyPath
-		}
-	}
-	
-	// 3. Fallback to path lookup
-	return "python"
-}
 
-func callPythonExcelGenerator(records []map[string]interface{}, question, sqlQuery string) (string, error) {
-	// 1. Prepare temp JSON payload
-	payload := map[string]interface{}{
-		"records":    records,
-		"question":   question,
-		"sql":        sqlQuery,
-		"export_dir": ExportDir,
-	}
-
-	tempFile := filepath.Join(ExportDir, fmt.Sprintf("temp_%d.json", time.Now().UnixNano()))
-	f, err := os.Create(tempFile)
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp json payload: %w", err)
-	}
-	defer os.Remove(tempFile) // Ensure cleanup happens
-
-	enc := json.NewEncoder(f)
-	if err = enc.Encode(payload); err != nil {
-		f.Close()
-		return "", fmt.Errorf("failed to serialize records payload: %w", err)
-	}
-	f.Close()
-
-	// 2. Call python subprocess
-	pyExe := getPythonExecutable()
-	log.Printf("Executing Python generator at: %s with script excel_generator.py", pyExe)
-	cmd := exec.Command(pyExe, "excel_generator.py", tempFile)
-	stdout, err := cmd.Output()
-	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("python execution error: %s (stderr: %s)", err, string(exitError.Stderr))
-		}
-		return "", fmt.Errorf("failed to run python excel generator: %w", err)
-	}
-
-	// Trim stdout response
-	filename := strings.TrimSpace(string(stdout))
-	if strings.Contains(filename, "ERROR") || filename == "" {
-		return "", fmt.Errorf("excel generator error: %s", filename)
-	}
-
-	return filename, nil
-}
 
 // ============================================================================
 // Config & Helpers
