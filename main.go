@@ -75,7 +75,10 @@ func main() {
 	// 5. Create Streamable HTTP Handler
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
 		return server
-	}, nil)
+	}, &mcp.StreamableHTTPOptions{
+		Stateless:                  true,
+		DisableLocalhostProtection: true,
+	})
 
 	// 6. Setup Standard HTTP Routes
 	mux := http.NewServeMux()
@@ -98,7 +101,7 @@ func main() {
 
 	// Schema Endpoint (for sidebar UI Explorer)
 	mux.HandleFunc("/schema", func(w http.ResponseWriter, r *http.Request) {
-		schemaStr := getSchemaString()
+		schemaStr := getSchemaString("")
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
 			"schema": schemaStr,
@@ -126,13 +129,15 @@ func main() {
 // Tool Registrations
 // ============================================================================
 
-type SchemaInput struct{}
+type SchemaInput struct {
+	TableName string `json:"table_name" jsonschema:"Optional specific table to inspect. If empty, returns summary of all tables."`
+}
 type SchemaOutput struct {
 	Text string `json:"text"`
 }
 
 func getDatabaseSchemaTool(ctx context.Context, req *mcp.CallToolRequest, input SchemaInput) (*mcp.CallToolResult, interface{}, error) {
-	schemaStr := getSchemaString()
+	schemaStr := getSchemaString(input.TableName)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
@@ -232,7 +237,7 @@ func queryPostgresTool(ctx context.Context, req *mcp.CallToolRequest, input Quer
 // Database & Utility Helpers
 // ============================================================================
 
-func getSchemaString() string {
+func getSchemaString(filterTable string) string {
 	query := `
 		SELECT 
 			table_name, 
@@ -242,10 +247,15 @@ func getSchemaString() string {
 			information_schema.columns 
 		WHERE 
 			table_schema = 'public'
-		ORDER BY 
-			table_name, ordinal_position;
 	`
-	rows, err := DB.Query(query)
+	var args []interface{}
+	if filterTable != "" {
+		query += " AND table_name = $1"
+		args = append(args, filterTable)
+	}
+	query += " ORDER BY table_name, ordinal_position;"
+
+	rows, err := DB.Query(query, args...)
 	if err != nil {
 		return fmt.Sprintf("Error fetching schema: %v", err)
 	}
