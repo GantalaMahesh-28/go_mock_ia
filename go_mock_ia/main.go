@@ -69,6 +69,11 @@ type MCPToolWrapper struct {
 	session *mcp.ClientSession
 	name    string
 	desc    string
+	schema  map[string]any
+}
+
+func (w *MCPToolWrapper) ParameterSchema() map[string]any {
+	return w.schema
 }
 
 func (w *MCPToolWrapper) Name() string        { return w.name }
@@ -136,6 +141,30 @@ type ExcelExportTool struct{}
 func (e ExcelExportTool) Name() string { return "export_excel" }
 func (e ExcelExportTool) Description() string {
 	return "Generates a beautifully styled multi-sheet BCG Excel report. Input must specify 'records' array of objects, 'question', and 'sql_query'."
+}
+
+func (e ExcelExportTool) ParameterSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"records": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+				},
+				"description": "The array of output rows/records to export.",
+			},
+			"question": map[string]any{
+				"type":        "string",
+				"description": "The user's natural language query.",
+			},
+			"sql_query": map[string]any{
+				"type":        "string",
+				"description": "The raw SQL query that produced the records.",
+			},
+		},
+		"required": []string{"records", "question", "sql_query"},
+	}
 }
 
 func (e ExcelExportTool) Call(ctx context.Context, input string) (string, error) {
@@ -366,64 +395,28 @@ func (a *CustomOpenAIAgent) Plan(
 }
 
 func (a *CustomOpenAIAgent) functions() []llms.FunctionDefinition {
-	return []llms.FunctionDefinition{
-		{
-			Name:        "get_database_schema",
-			Description: "Queries database information schema and returns a structured string reference.",
-			Parameters: map[string]any{
+	res := make([]llms.FunctionDefinition, 0)
+	for _, tool := range a.Tools {
+		var params map[string]any
+		if schematized, ok := tool.(interface{ ParameterSchema() map[string]any }); ok {
+			params = schematized.ParameterSchema()
+		} else {
+			// Fallback schema for simple string tools
+			params = map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"table_name": map[string]any{
-						"type":        "string",
-						"description": "Optional specific table to inspect. If empty, returns summary of all tables.",
-					},
+					"__arg1": map[string]any{"type": "string"},
 				},
-			},
-		},
-		{
-			Name:        "query_postgres",
-			Description: "Executes a SQL query on PostgreSQL, returns a preview, and generates a formatted BCG Excel sheet.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"sql_query": map[string]any{
-						"type":        "string",
-						"description": "The raw read-only SQL query to run against the database.",
-					},
-					"question": map[string]any{
-						"type":        "string",
-						"description": "The user's natural language question describing the query goal.",
-					},
-				},
-				"required": []string{"sql_query", "question"},
-			},
-		},
-		{
-			Name:        "export_excel",
-			Description: "Generates a beautifully styled multi-sheet BCG Excel report.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"records": map[string]any{
-						"type": "array",
-						"items": map[string]any{
-							"type": "object",
-						},
-						"description": "The array of output rows/records to export.",
-					},
-					"question": map[string]any{
-						"type":        "string",
-						"description": "The user's natural language query.",
-					},
-					"sql_query": map[string]any{
-						"type":        "string",
-						"description": "The raw SQL query that produced the records.",
-					},
-				},
-				"required": []string{"records", "question", "sql_query"},
-			},
-		},
+				"required": []string{"__arg1"},
+			}
+		}
+		res = append(res, llms.FunctionDefinition{
+			Name:        tool.Name(),
+			Description: tool.Description(),
+			Parameters:  params,
+		})
 	}
+	return res
 }
 
 func (a *CustomOpenAIAgent) constructScratchPad(steps []schema.AgentStep) []llms.ChatMessage {
@@ -556,10 +549,24 @@ func main() {
 	log.Println("Discovered MCP Server tools:")
 	for _, t := range toolsResult.Tools {
 		log.Printf("  - %s: %s", t.Name, t.Description)
+
+		var schemaMap map[string]any
+		if t.InputSchema != nil {
+			if m, ok := t.InputSchema.(map[string]any); ok {
+				schemaMap = m
+			} else {
+				// Serialize/deserialize to get a map[string]any
+				if b, err := json.Marshal(t.InputSchema); err == nil {
+					json.Unmarshal(b, &schemaMap)
+				}
+			}
+		}
+
 		agentTools = append(agentTools, &MCPToolWrapper{
 			session: session,
 			name:    t.Name,
 			desc:    t.Description,
+			schema:  schemaMap,
 		})
 	}
 
