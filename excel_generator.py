@@ -170,5 +170,5 @@ if __name__ == "__main__":
             {"Product Name": "Lipton Yellow Label 100s", "Category": "Beverages", "Revenue": 8900.20, "Units Sold": 410},
             {"Product Name": "Rexona Roll-On", "Category": "Personal Care", "Revenue": 5100.00, "Units Sold": 120},
         ]
-        fn = generate_excel(test_records, "What are the sales per product?", "SELECT name, cat, rev, units FROM sales", "./test_exports")
+        fn = generate_excel(test_records, "What are the sales per  product?", "SELECT name, cat, rev, units FROM sales", "./test_exports")
         print(f"Generated test file: {fn}")
