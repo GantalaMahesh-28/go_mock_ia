@@ -84,6 +84,12 @@ func main() {
 	// 3. Start Subscriptions (Tools, Prompts, Resources)
 	clientManager.ListenForSubscriptions(ctx, func() {
 		log.Println("Tools or capabilities updated dynamically from server!")
+		// Automatically fetch the new tools so they are ready for the next query
+		if err := clientManager.Discover(ctx); err != nil {
+			log.Printf("Error during dynamic re-discovery: %v", err)
+		} else {
+			log.Printf("Successfully re-discovered tools: %d tools now available.", len(clientManager.Tools))
+		}
 	})
 
 	// 4. Start REST API

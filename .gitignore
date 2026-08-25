@@ -6,3 +6,5 @@ __pycache__/
 .vscode/
 *.exe
 data/excel_exports/
+
+/graphify_out/

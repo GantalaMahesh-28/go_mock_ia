@@ -111,6 +111,29 @@ func main() {
 	// File Server for Downloads
 	mux.Handle("/download/", http.StripPrefix("/download/", http.FileServer(http.Dir(ExportDir))))
 
+	// Manual Trigger to dynamically add a tool (PoC for dynamic subscriptions)
+	mux.HandleFunc("/trigger-add-tool", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Manual trigger received! Adding new mock tool dynamically...")
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "get_server_status",
+			Description: "Returns the current health status of the MCP server.",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input interface{}) (*mcp.CallToolResult, interface{}, error) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: "The server is running perfectly with dynamic subscriptions active!",
+					},
+				},
+			}, nil, nil
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "success",
+			"message": "Tool 'get_server_status' added dynamically! Notification should be broadcast automatically by the SDK.",
+		})
+	})
+
 	// Bind MCP Streamable HTTP handlers
 	mux.Handle("/mcp", mcpHandler)
 	mux.Handle("/mcp/", mcpHandler)

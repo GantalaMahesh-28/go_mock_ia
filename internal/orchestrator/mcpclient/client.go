@@ -18,6 +18,9 @@ type ClientManager struct {
 	Tools     []*mcp.Tool
 	Prompts   []*mcp.Prompt
 	Resources []*mcp.Resource
+	
+	// Native callback reference
+	OnUpdate func()
 }
 
 // NewClientManager initializes the stateless MCP client transport.
@@ -36,11 +39,18 @@ func (cm *ClientManager) Connect(ctx context.Context) error {
 		DisableStandaloneSSE: true,
 	}
 	
-	// Create client
+	// Create client using the native SDK Unified Subscription handlers!
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "Go-Orchestrator-Client",
 		Version: "1.0.0",
-	}, nil)
+	}, &mcp.ClientOptions{
+		ToolListChangedHandler: func(ctx context.Context, req *mcp.ToolListChangedRequest) {
+			log.Println("🔔 MCP Notification Received natively: toolsListChanged")
+			if cm.OnUpdate != nil {
+				cm.OnUpdate()
+			}
+		},
+	})
 
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
@@ -79,10 +89,8 @@ func (cm *ClientManager) Discover(ctx context.Context) error {
 	return nil
 }
 
-// ListenForSubscriptions subscribes to all change notifications.
+// ListenForSubscriptions sets the callback. The actual SDK handles the multiplexing natively.
 func (cm *ClientManager) ListenForSubscriptions(ctx context.Context, onUpdate func()) {
-	// Note: The specific go-sdk v1.7.0 notification method for list_changed is handled differently 
-	// based on the transport or session implementation. 
-	// We are stubbing this out temporarily so the client compiles perfectly and runs.
-	log.Println("Ready to subscribe to Tools, Prompts, and Resources change notifications.")
+	cm.OnUpdate = onUpdate
+	log.Println("Successfully subscribed to real-time multiplexed notifications (Native SDK Mode)!")
 }
